@@ -1,0 +1,2 @@
+-keeppackagenames org.jsoup.nodes
+-keepnames class com.streamapi.custom.StreamAPIException {}

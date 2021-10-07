@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">TubeSB Lib</string>
+    <string name="btn_fetch">Fetch</string>
+    <string name="btn_fetching_stream">Fetching…</string>
+
+    <string name="hint_url">URL</string>
+    <string name="sample_url">https://tubesb.com/h9huj0ev4fxk.html</string>
+</resources>
