@@ -32,20 +32,36 @@ class MainActivity : AppCompatActivity() {
         }
 
         val url = binding.edt.text.toString()
-        StreamAPI.fetch(url, object : StreamAPI.Callback() {
-            override fun onResponse(streamTask: StreamTask) {
-                if (streamTask.isSuccessful) {
-                    showStreamsDialog(streamTask.streams)
-                } else showErrorDialog(streamTask.exception)
 
-                with(binding.btnFetch) {
-                    isEnabled = true
-                    setText(R.string.btn_fetch)
+        StreamAPI.fetch(
+            context = this,
+            url = url,
+            timeout = StreamAPI.DEFAULT_TIMEOUT,
+            callback = object : StreamAPI.Callback {
+                override fun onResponse(streamTask: StreamTask) {
+                    if (streamTask.isSuccessful) {
+                        showStreamsDialog(streamTask.streams)
+                    } else {
+                        showErrorDialog(streamTask.exception)
+                    }
+
+                    showStacktrace(streamTask.stacktrace)
+
+                    with(binding.btnFetch) {
+                        isEnabled = true
+                        setText(R.string.btn_fetch)
+                    }
                 }
-            }
-        })
+            })
 
+    }
 
+    private fun showStacktrace(stacktrace: String) {
+        MaterialAlertDialogBuilder(this@MainActivity)
+            .setTitle("Stacktrace")
+            .setMessage(stacktrace)
+            .setNegativeButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun showStreamsDialog(streams: ArrayList<Media>) {
@@ -78,7 +94,7 @@ class MainActivity : AppCompatActivity() {
     private fun fetchDownloadUrl(media: Media) {
         Snackbar.make(binding.root, "Fetching download link...", 1000).show()
 
-        StreamAPI.fetchDirectLink(media, object : StreamAPI.DirectLinkCallback() {
+        StreamAPI.fetchDirectLink(media, object : StreamAPI.DirectLinkCallback {
             override fun onResponse(directLinkTask: DirectLinkTask) {
                 if (directLinkTask.isSuccessful) {
                     MaterialAlertDialogBuilder(this@MainActivity)

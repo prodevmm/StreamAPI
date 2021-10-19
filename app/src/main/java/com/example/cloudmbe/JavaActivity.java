@@ -5,7 +5,6 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.widget.ArrayAdapter;
 
-import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -14,8 +13,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 import com.streamapi.custom.StreamAPI;
 import com.streamapi.custom.dto.Media;
-import com.streamapi.custom.tasks.DirectLinkTask;
-import com.streamapi.custom.tasks.StreamTask;
 
 import java.util.ArrayList;
 import java.util.Objects;
@@ -31,6 +28,7 @@ public class JavaActivity extends AppCompatActivity {
         setContentView(binding.getRoot());
 
         binding.btnFetch.setOnClickListener(v -> fetchStream());
+
     }
 
     private void fetchStream() {
@@ -38,17 +36,26 @@ public class JavaActivity extends AppCompatActivity {
         binding.btnFetch.setText(R.string.btn_fetching_stream);
 
         String url = Objects.requireNonNull(binding.edt.getText()).toString();
-        StreamAPI.INSTANCE.fetch(url, new StreamAPI.Callback() {
-            @Override
-            public void onResponse(@NonNull StreamTask streamTask) {
-                if (streamTask.isSuccessful()) {
-                    showStreamsDialog(streamTask.getStreams());
-                } else showErrorDialog(streamTask.getException());
-
-                binding.btnFetch.setEnabled(true);
-                binding.btnFetch.setText(R.string.btn_fetch);
+        StreamAPI.INSTANCE.fetch(this, url, StreamAPI.DEFAULT_TIMEOUT, streamTask -> {
+            if (streamTask.isSuccessful()) {
+                showStreamsDialog(streamTask.getStreams());
+            } else {
+                showErrorDialog(streamTask.getException());
             }
+
+            showStacktrace(streamTask.getStacktrace());
+
+            binding.btnFetch.setEnabled(true);
+            binding.btnFetch.setText(R.string.btn_fetch);
         });
+    }
+
+    private void showStacktrace(String stacktrace) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Stacktrace")
+                .setMessage(stacktrace)
+                .setNegativeButton(android.R.string.ok, null)
+                .show();
     }
 
     private void showStreamsDialog(ArrayList<Media> streams) {
@@ -81,20 +88,17 @@ public class JavaActivity extends AppCompatActivity {
     private void fetchDownloadUrl(Media media) {
         Snackbar.make(binding.getRoot(), "Fetching download link...", 1000).show();
 
-        StreamAPI.INSTANCE.fetchDirectLink(media, new StreamAPI.DirectLinkCallback() {
-            @Override
-            public void onResponse(@NonNull DirectLinkTask directLinkTask) {
-                if (directLinkTask.isSuccessful()) {
-                    new MaterialAlertDialogBuilder(JavaActivity.this)
-                            .setTitle("Success")
-                            .setMessage(directLinkTask.getUrl())
-                            .setPositiveButton("Open", (dialog, which) -> {
-                                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(media.getUrl()));
-                                startActivity(intent);
-                            })
-                            .show();
-                } else showErrorDialog(directLinkTask.getException());
-            }
+        StreamAPI.INSTANCE.fetchDirectLink(media, directLinkTask -> {
+            if (directLinkTask.isSuccessful()) {
+                new MaterialAlertDialogBuilder(JavaActivity.this)
+                        .setTitle("Success")
+                        .setMessage(directLinkTask.getUrl())
+                        .setPositiveButton("Open", (dialog, which) -> {
+                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(media.getUrl()));
+                            startActivity(intent);
+                        })
+                        .show();
+            } else showErrorDialog(directLinkTask.getException());
         });
     }
 

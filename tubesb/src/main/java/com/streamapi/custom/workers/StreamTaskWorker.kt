@@ -1,123 +1,169 @@
 package com.streamapi.custom.workers
 
+import android.annotation.SuppressLint
+import android.content.Context
 import android.net.Uri
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import com.streamapi.custom.StreamAPI
 import com.streamapi.custom.StreamAPIException
-import com.streamapi.custom.dto.Media
 import com.streamapi.custom.tasks.StreamTask
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
-import org.jsoup.select.Elements
-import java.io.IOException
-
-internal object StreamTaskWorker {
-    private const val JWPLAYER = "jwplayer"
-    private const val STREAM_URL_SUFFIX = "/index-v1-a1.m3u8"
-    private val STREAM_REGEX by lazy { "\\[\\{file:\"(.*)\"".toRegex() }
-    private val ROUTE_REGEX by lazy { "download_video\\('(.*)'\\)".toRegex() }
-
-    private const val MSG_SCRIPT_NOT_FOUND = "Required script that contains stream url not found."
-    private const val MSG_STREAM_REGEX_NOT_MATCH = "Cannot find stream url using regex."
-    private const val MSG_NOT_ENOUGH_SEGMENTS_FOR_STREAM =
-        "Not enough segments to generate stream url."
-    private const val MSG_NO_DOWNLOAD_ROUTES =
-        "No available routes found."
-    private const val MSG_NOT_ENOUGH_SEGMENTS_FOR_DOWNLOAD =
-        "Not enough segments to generate download url."
-    private const val MSG_ROUTE_REGEX_NOT_MATCH =
-        "Cannot find hash codes to generate download route."
-    private const val MSG_NO_FILE_SIZE =
-        "No file size found in download url."
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlin.concurrent.schedule
 
 
-    private fun getHost(url: String): String {
-        val uri = Uri.parse(url)
-        return if (uri != null && uri.host != null) uri.host ?: "" else ""
+internal class StreamTaskWorker(
+    private val context: Context,
+    private val url: String,
+    private val timeout: Long,
+    private val callback: StreamAPI.Callback
+) {
+    companion object {
+        private const val M3U8_EXTENSION = ".m3u8"
+        private const val STREAM_URL_SUFFIX = "/index-v1-a1.m3u8"
+        private const val TASK_TIMEOUT = "Task is timeout."
+        private const val MSG_NOT_ENOUGH_SEGMENTS_FOR_STREAM =
+            "Not enough segments to generate stream url."
     }
 
-    fun get(url: String): StreamTask {
-        val host = getHost(url)
+    private val stackTraceBuilder = StringBuilder()
+    private var webView: WebView? = null
+    private val dateFormat = SimpleDateFormat("h:mm:ss a", Locale.ENGLISH)
 
-        return try {
-            val document = Jsoup.connect(url).get()
-            val scriptElements = document.select("script")
-            var selectedScript: String? = null
+    private var timerTask: TimerTask? = null
 
-            for (scriptElement in scriptElements) {
-                val script = scriptElement.toString()
-                if (script.contains(JWPLAYER)) {
-                    selectedScript = script
-                    break
-                }
-            }
+    private fun appendStacktrace(stack: String) {
+        stackTraceBuilder
+            .append(dateFormat.format(Date(System.currentTimeMillis())))
+            .append("\n")
+            .append(stack)
+            .append("\n\n")
+    }
 
-            if (selectedScript != null) {
-                val result = STREAM_REGEX.find(selectedScript)
-                if (result != null && result.groupValues.isNotEmpty()) {
-                    val rawUrl = result.groupValues[1]
-                    val segments = rawUrl.split(",")
+    @SuppressLint("SetJavaScriptEnabled")
+    fun start() {
+        try {
+            appendStacktrace("- started STREAM TASK\n===========")
 
-                    if (segments.size >= 3) {
-                        val streamUrlList = mutableListOf<String>()
-                        for (i in 1..segments.size - 2) {
-                            streamUrlList.add("${segments[0]}${segments[i]}$STREAM_URL_SUFFIX")
-                        }
+            val uri = Uri.parse(url)
+            appendStacktrace("- original url : $url")
 
-                        downloadRoutesTask(document, streamUrlList, host)
-                    } else {
-                        taskWithException(StreamAPIException(MSG_NOT_ENOUGH_SEGMENTS_FOR_STREAM))
+            val playUrl = "${uri.scheme}://${uri.host}/play${uri.path}"
+            appendStacktrace("- formatted url into\n$playUrl")
+
+            webView = WebView(context)
+            val settings = webView?.settings
+            settings?.allowContentAccess = true
+            settings?.allowFileAccess = true
+            settings?.javaScriptEnabled = true
+            settings?.loadWithOverviewMode = true
+            settings?.useWideViewPort = true
+            settings?.databaseEnabled = true
+            settings?.domStorageEnabled = true
+
+            webView?.webChromeClient = WebChromeClient()
+            webView?.webViewClient = object : WebViewClient() {
+                override fun onLoadResource(view: WebView?, url: String?) {
+                    super.onLoadResource(view, url)
+                    if (url?.contains(M3U8_EXTENSION, false) == true) {
+                        appendStacktrace("- found m3u8 raw url")
+                        destroyWebView()
+                        appendStacktrace("- hidden WebView destroyed")
+                        extractStreams(url)
                     }
-                } else {
-                    taskWithException(StreamAPIException(MSG_STREAM_REGEX_NOT_MATCH))
                 }
-            } else {
-                taskWithException(StreamAPIException(MSG_SCRIPT_NOT_FOUND))
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    appendStacktrace("- finished hidden WebView page")
+
+                    webView?.evaluateJavascript(
+                        "let loadingDiv = document.getElementById(\"loading\")\n" +
+                                "    let observer = new MutationObserver(function(mutationList){\n" +
+                                "        if (loadingDiv.style.display === \"none\"){\n" +
+                                "            observer.disconnect();\n" +
+                                "            var lastDiv = document.querySelectorAll(\"div\");\n" +
+                                "            if (lastDiv.length > 0){\n" +
+                                "                lastDiv[lastDiv.length -1].click();\n" +
+                                "            }\n" +
+                                "        }\n" +
+                                "    });\n" +
+                                "    observer.observe(loadingDiv, { attributes: true, childList: false });",
+                        null
+                    )
+
+                    appendStacktrace("- injected javascript codes")
+                }
             }
-        } catch (exception: IOException) {
-            taskWithException(exception)
-        }
-    }
 
-    private fun taskWithException(exception: Exception) =
-        StreamTask(false, null, exception)
+            webView?.loadUrl(playUrl)
+            appendStacktrace("- created hidden WebView")
 
-    private fun downloadRoutesTask(
-        document: Document,
-        streamUrlList: MutableList<String>,
-        host: String
-    ): StreamTask {
-        val streams = arrayListOf<Media>()
-
-        val trElements: Elements? = document.select("div#content table.tbl1 tbody tr:has(td)")
-        if (trElements != null) {
-            trElements.forEachIndexed { index, trElement ->
-                val tdElements = trElement.select("td")
-                if (tdElements.size >= 2) {
-                    val aElement = tdElements[0].selectFirst("a")
-                    if (aElement != null) {
-                        val onClickScript = aElement.attr("onclick")
-                        val result = ROUTE_REGEX.find(onClickScript)
-                        if (result != null && result.groupValues.isNotEmpty()) {
-                            val rawValues = result.groupValues[1].split("','")
-                            val downloadRoute =
-                                "https://$host/dl?op=download_orig&id=${rawValues[0]}&mode=${rawValues[1]}&hash=${rawValues[2]}"
-                            val rawDetails = tdElements[1].text().split(",")
-                            if (rawDetails.size >= 2) {
-                                val media = Media(
-                                    quality = aElement.text(),
-                                    resolution = rawDetails[0].trim(),
-                                    fileSize = rawDetails[1].trim(),
-                                    url = streamUrlList[index],
-                                    downloadRoute = downloadRoute
-                                )
-                                streams.add(media)
-                            } else return taskWithException(StreamAPIException(MSG_NO_FILE_SIZE))
-                        } else return taskWithException(StreamAPIException(MSG_ROUTE_REGEX_NOT_MATCH))
-                    } else return taskWithException(
-                        StreamAPIException(MSG_NOT_ENOUGH_SEGMENTS_FOR_DOWNLOAD)
+            timerTask = Timer().schedule(timeout) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    destroyWebView()
+                    callback.onResponse(
+                        StreamTask(
+                            false,
+                            null,
+                            StreamAPIException("$TASK_TIMEOUT\ntimeout : $timeout ms"),
+                            stackTraceBuilder.toString()
+                        )
                     )
                 }
             }
-            return StreamTask(true, streams, null)
-        } else return taskWithException(StreamAPIException(MSG_NO_DOWNLOAD_ROUTES))
+            appendStacktrace("- started timer task")
+
+        } catch (e: Exception) {
+            taskWithException(e)
+        }
+    }
+
+    private fun taskWithException(exception: Exception) {
+        timerTask?.cancel()
+        invokeCallback(StreamTask(false, null, exception, stackTraceBuilder.toString()))
+    }
+
+    private fun invokeCallback(streamTask: StreamTask) {
+        CoroutineScope(Dispatchers.Main).launch {
+            callback.onResponse(streamTask)
+        }
+    }
+
+    private fun extractStreams(rawUrl: String) {
+        val segments = rawUrl.split(",")
+        if (segments.size >= 3) {
+            val streamUrlList = mutableListOf<String>()
+            for (i in 1..segments.size - 2) {
+                streamUrlList.add("${segments[0]}${segments[i]}$STREAM_URL_SUFFIX")
+            }
+            appendStacktrace("- extracted streams \n $streamUrlList")
+
+            CoroutineScope(Dispatchers.IO).launch {
+                appendStacktrace("- initialized IO CoroutineScope for download link extractor task")
+                val streamTask =
+                    DownloadExtractWorker(streamUrlList, url, stackTraceBuilder.toString()).get()
+                appendStacktrace("- finished download link extractor task")
+
+                timerTask?.cancel()
+                appendStacktrace("- cancelled timer task")
+                invokeCallback(streamTask)
+            }
+        } else {
+            taskWithException(StreamAPIException(MSG_NOT_ENOUGH_SEGMENTS_FOR_STREAM))
+        }
+    }
+
+    private fun destroyWebView() {
+        if (webView != null) {
+            webView?.loadUrl("about:blank")
+            webView?.destroy()
+            webView = null
+        }
     }
 }

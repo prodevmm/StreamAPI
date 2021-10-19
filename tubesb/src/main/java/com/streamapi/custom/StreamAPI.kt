@@ -1,5 +1,6 @@
 package com.streamapi.custom
 
+import android.content.Context
 import androidx.core.util.PatternsCompat
 import com.streamapi.custom.dto.Media
 import com.streamapi.custom.tasks.DirectLinkTask
@@ -12,21 +13,20 @@ import kotlinx.coroutines.launch
 
 object StreamAPI {
     private const val MSG_INVALID_URL = "URL is invalid."
+    @Suppress("unused")
+    const val DEFAULT_TIMEOUT = 10000L
 
-    abstract class Callback {
-        abstract fun onResponse(streamTask: StreamTask)
+    interface Callback {
+        fun onResponse(streamTask: StreamTask)
     }
 
-    abstract class DirectLinkCallback {
-        abstract fun onResponse(directLinkTask: DirectLinkTask)
+    interface DirectLinkCallback {
+        fun onResponse(directLinkTask: DirectLinkTask)
     }
 
-    fun fetch(url: String, callback: Callback) {
+    fun fetch(context: Context, url: String, timeout: Long, callback: Callback) {
         if (PatternsCompat.WEB_URL.matcher(url).matches()) {
-            CoroutineScope(Dispatchers.IO).launch {
-                val task = StreamTaskWorker.get(url)
-                CoroutineScope(Dispatchers.Main).launch { callback.onResponse(task) }
-            }
+            StreamTaskWorker(context, url, timeout, callback).start()
         } else {
             callback.onResponse(StreamTask(false, null, StreamAPIException(MSG_INVALID_URL)))
         }
