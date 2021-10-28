@@ -2,19 +2,15 @@ package com.streamapi.custom.workers
 
 import android.net.Uri
 import com.streamapi.custom.StreamAPIException
-import com.streamapi.custom.dto.Media
-import com.streamapi.custom.tasks.StreamTask
+import com.streamapi.custom.dto.Route
+import com.streamapi.custom.tasks.RouteTask
 import org.jsoup.Jsoup
 import org.jsoup.select.Elements
 import java.io.IOException
-import java.text.SimpleDateFormat
-import java.util.*
 
-internal class DownloadExtractWorker(
-    private val streamUrlList: MutableList<String>,
-    private val url: String,
-    private val stacktrace: String
-) {
+internal class RouteWorker(
+    private val url: String
+) : BaseWorker() {
 
     companion object {
         private val ROUTE_REGEX by lazy { "download_video\\('(.*)'\\)".toRegex() }
@@ -28,34 +24,21 @@ internal class DownloadExtractWorker(
             "No file size found in download url."
     }
 
-
-    private val dateFormat = SimpleDateFormat("h:mm:ss a", Locale.ENGLISH)
-    private val stackTraceBuilder = StringBuilder()
-
     private fun getHost(url: String): String {
         val uri = Uri.parse(url)
         return if (uri != null && uri.host != null) uri.host ?: "" else ""
     }
 
-    private fun appendStacktrace(stack: String) {
-        stackTraceBuilder
-            .append(dateFormat.format(Date(System.currentTimeMillis())))
-            .append("\n")
-            .append(stack)
-            .append("\n\n")
-    }
-
-    fun get(): StreamTask {
-        stackTraceBuilder.append(stacktrace)
+    fun get(): RouteTask {
         val host = getHost(url)
 
         return try {
-            appendStacktrace("- started DOWNLOAD LINK EXTRACTOR\n===========")
+            appendStacktrace("- started RouteWorker\n\t--------")
             appendStacktrace("- target url $url")
             val document = Jsoup.connect(url).get()
             appendStacktrace("- url has scraped")
 
-            val streams = arrayListOf<Media>()
+            val streams = arrayListOf<Route>()
 
             val trElements: Elements? =
                 document.select("div#content table.tbl1 tbody tr:has(td)")
@@ -77,12 +60,11 @@ internal class DownloadExtractWorker(
                                 val downloadRoute =
                                     "https://$host/dl?op=download_orig&id=${rawValues[0]}&mode=${rawValues[1]}&hash=${rawValues[2]}"
                                 val rawDetails = tdElements[1].text().split(",")
-                                if (rawDetails.size >= 2 && streamUrlList.size > index) {
-                                    val media = Media(
+                                if (rawDetails.size >= 2) {
+                                    val media = Route(
                                         quality = aElement.text(),
                                         resolution = rawDetails[0].trim(),
                                         fileSize = rawDetails[1].trim(),
-                                        url = streamUrlList[index],
                                         downloadRoute = downloadRoute
                                     )
                                     streams.add(media)
@@ -102,7 +84,7 @@ internal class DownloadExtractWorker(
                     }
                 }
 
-                return StreamTask(true, streams, null, stackTraceBuilder.toString())
+                return RouteTask(true, streams, null, stacktrace)
             } else return taskWithException(StreamAPIException(MSG_NO_DOWNLOAD_ROUTES))
         } catch (exception: IOException) {
             taskWithException(exception)
@@ -110,5 +92,5 @@ internal class DownloadExtractWorker(
     }
 
     private fun taskWithException(exception: Exception) =
-        StreamTask(false, null, exception, stackTraceBuilder.toString())
+        RouteTask(false, null, exception, stacktrace)
 }

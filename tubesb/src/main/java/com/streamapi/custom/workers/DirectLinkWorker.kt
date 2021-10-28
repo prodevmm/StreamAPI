@@ -6,7 +6,7 @@ import org.jsoup.Jsoup
 import java.io.IOException
 
 
-internal object DirectLinkTaskWorker {
+internal object DirectLinkWorker {
     private const val MSG_DIRECT_LINK_NOT_FOUND = "Direct link not found in download route."
 
     fun get(url: String): DirectLinkTask {

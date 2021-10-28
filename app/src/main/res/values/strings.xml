@@ -1,8 +1,15 @@
 <resources>
-    <string name="app_name">TubeSB Lib</string>
-    <string name="btn_fetch">Fetch</string>
-    <string name="btn_fetching_stream">Fetching…</string>
+    <string name="app_name">StreamAPI Library</string>
+    <string name="btn_fetch_routes">Fetch Routes</string>
+    <string name="btn_fetch_streams">Fetch Streams</string>
+    <string name="btn_fetching">Fetching …</string>
 
     <string name="hint_url">URL</string>
+    <string name="hint_timeout">Timeout</string>
+    <string name="hint_resolution_process_gap">Resolution process gap</string>
+
     <string name="sample_url">https://tubesb.com/h9huj0ev4fxk.html</string>
+    <string name="default_timeout">10000</string>
+    <string name="skip_resolution_process">Skip resolution extractor process</string>
+    <string name="default_gap">1000</string>
 </resources>

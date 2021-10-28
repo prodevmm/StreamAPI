@@ -1,4 +1,3 @@
 package com.streamapi.custom
 
-class StreamAPIException(message: String) :
-    Exception(message)
+class StreamAPIException(message: String) : Exception(message)

@@ -12,7 +12,9 @@ import com.example.cloudmbe.databinding.ActivityMainBinding;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 import com.streamapi.custom.StreamAPI;
-import com.streamapi.custom.dto.Media;
+import com.streamapi.custom.StreamBuilder;
+import com.streamapi.custom.dto.Route;
+import com.streamapi.custom.dto.Stream;
 
 import java.util.ArrayList;
 import java.util.Objects;
@@ -27,27 +29,60 @@ public class JavaActivity extends AppCompatActivity {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        binding.btnFetch.setOnClickListener(v -> fetchStream());
+        binding.btnFetchRoutes.setOnClickListener(v -> fetchRoutes());
+        binding.btnFetchStreams.setOnClickListener(v -> fetchStreams());
 
     }
 
-    private void fetchStream() {
-        binding.btnFetch.setEnabled(false);
-        binding.btnFetch.setText(R.string.btn_fetching_stream);
+    private void fetchRoutes() {
+        binding.btnFetchRoutes.setEnabled(false);
+        binding.btnFetchRoutes.setText(R.string.btn_fetching);
 
         String url = Objects.requireNonNull(binding.edt.getText()).toString();
-        StreamAPI.INSTANCE.fetch(this, url, StreamAPI.DEFAULT_TIMEOUT, streamTask -> {
+        // use StreamAPI.INSTANCE.fetchRoutes if not works
+        StreamAPI.Companion.fetchRoutes(url, routeTask -> {
+            if (routeTask.isSuccessful()) {
+                showRouteList(routeTask.getRoutes());
+            } else {
+                showErrorDialog(routeTask.getException());
+            }
+            showStacktrace(routeTask.getStacktrace());
+
+            binding.btnFetchRoutes.setEnabled(true);
+            binding.btnFetchRoutes.setText(R.string.btn_fetch_routes);
+        });
+
+    }
+
+    private void fetchStreams() {
+        binding.btnFetchStreams.setEnabled(false);
+        binding.btnFetchStreams.setText(R.string.btn_fetching);
+
+        String url = Objects.requireNonNull(binding.edt.getText()).toString();
+        long timeout = Long.parseLong(Objects.requireNonNull(binding.edtTimeout.getText()).toString());
+        long gap = Long.parseLong(Objects.requireNonNull(binding.edtResolutionProcessGap.getText()).toString());
+        boolean skipResolutionProcess = binding.skipResolutionProcess.isChecked();
+
+        StreamBuilder builder = new StreamBuilder(this, url)
+                .setTimeout(timeout) // optional
+                .setResolutionProcessGap(gap); // optional
+
+        if (skipResolutionProcess) {
+            builder.skipResolutionProcess(); // optional
+        }
+
+        builder.build().fetchStreams(streamTask -> {
             if (streamTask.isSuccessful()) {
-                showStreamsDialog(streamTask.getStreams());
+                showStreamList(streamTask.getStreams());
             } else {
                 showErrorDialog(streamTask.getException());
             }
-
             showStacktrace(streamTask.getStacktrace());
 
-            binding.btnFetch.setEnabled(true);
-            binding.btnFetch.setText(R.string.btn_fetch);
+            binding.btnFetchStreams.setEnabled(true);
+            binding.btnFetchStreams.setText(R.string.btn_fetch_streams);
         });
+
     }
 
     private void showStacktrace(String stacktrace) {
@@ -58,8 +93,43 @@ public class JavaActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void showStreamsDialog(ArrayList<Media> streams) {
-        ArrayAdapter<Media> adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, streams);
+    private void showRouteList(ArrayList<Route> routes) {
+        ArrayAdapter<Route> adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, routes);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Routes")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setAdapter(adapter, (dialog, which) -> showRouteInfo(routes.get(which)));
+    }
+
+    private void showRouteInfo(Route route) {
+        String message = "Resolution : " + route.getResolution() + "\n\nFile size : " + route.getFileSize();
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(route.getQuality())
+                .setMessage(message)
+                .setNegativeButton("Download", (dialog, which) -> fetchDownloadUrl(route))
+                .show();
+    }
+
+    private void fetchDownloadUrl(Route route) {
+        Snackbar.make(binding.getRoot(), "Fetching download link...", 1000).show();
+
+        StreamAPI.Companion.fetchDirectLink(route, directLinkTask -> {
+            if (directLinkTask.isSuccessful()) {
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle("Success")
+                        .setMessage(directLinkTask.getUrl())
+                        .setPositiveButton("Open", (dialog, which) -> {
+                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(directLinkTask.getUrl()));
+                            startActivity(intent);
+                        })
+                        .show();
+            } else showErrorDialog(directLinkTask.getException());
+        });
+    }
+
+    private void showStreamList(ArrayList<Stream> streams) {
+        ArrayAdapter<Stream> adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, streams);
 
         new MaterialAlertDialogBuilder(this)
                 .setTitle("Streams")
@@ -68,38 +138,16 @@ public class JavaActivity extends AppCompatActivity {
                 .show();
     }
 
-
-    private void showStreamInfo(Media media) {
-        String message = "Resolution : " + media.getResolution() +
-                "\n\nFile size : " + media.getFileSize() +
-                "\n\nStream URL : " + media.getUrl();
-
+    private void showStreamInfo(Stream stream) {
+        String message = "Resolution : " + stream.getResolution() + "\n\nURL : " + stream.getUrl();
         new MaterialAlertDialogBuilder(this)
-                .setTitle(media.getQuality())
+                .setTitle(stream.getResolution())
                 .setMessage(message)
-                .setPositiveButton("Open", (dialog, which) -> {
-                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(media.getUrl()));
+                .setNegativeButton("Play", (dialog, which) -> {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(stream.getUrl()));
                     startActivity(intent);
                 })
-                .setNegativeButton("Download", (dialog, which) -> fetchDownloadUrl(media))
                 .show();
-    }
-
-    private void fetchDownloadUrl(Media media) {
-        Snackbar.make(binding.getRoot(), "Fetching download link...", 1000).show();
-
-        StreamAPI.INSTANCE.fetchDirectLink(media, directLinkTask -> {
-            if (directLinkTask.isSuccessful()) {
-                new MaterialAlertDialogBuilder(JavaActivity.this)
-                        .setTitle("Success")
-                        .setMessage(directLinkTask.getUrl())
-                        .setPositiveButton("Open", (dialog, which) -> {
-                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(media.getUrl()));
-                            startActivity(intent);
-                        })
-                        .show();
-            } else showErrorDialog(directLinkTask.getException());
-        });
     }
 
     private void showErrorDialog(Exception exception) {
@@ -109,6 +157,5 @@ public class JavaActivity extends AppCompatActivity {
                 .setNegativeButton(android.R.string.ok, null)
                 .show();
     }
-
 
 }
